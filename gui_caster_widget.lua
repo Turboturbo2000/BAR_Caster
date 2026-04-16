@@ -53,6 +53,7 @@ local spGetTeamResources    = Spring.GetTeamResources
 local spGetUnitDefID        = Spring.GetUnitDefID
 local spGetUnitPosition     = Spring.GetUnitPosition
 local spGetUnitHealth       = Spring.GetUnitHealth
+local spGetUnitCommands     = Spring.GetUnitCommands
 local spWorldToScreenCoords = Spring.WorldToScreenCoords
 
 ------------------------------------------------------------------------
@@ -384,6 +385,14 @@ local function initPlayerList()
                 prevMetalKilled = 0,
                 combatHP = 0,
                 combatPositions = {},
+                metalShare = 0,
+                commHP = 0,
+                commMaxHP = 0,
+                commX = nil,
+                commZ = nil,
+                commFront = false,
+                factoryQueue = "",
+                superweapon = nil,
             }
         end
     end
@@ -434,10 +443,11 @@ local function updateTracking(gameSecs)
     for _, p in ipairs(S.specPlayerList) do
         local td = S.specAllData[p.teamID]
         if td then
-            local sMCur, sMStor, _, sMInc, sMExp = spGetTeamResources(p.teamID, "metal")
+            local sMCur, sMStor, sMPull, sMInc, sMExp, sMShare = spGetTeamResources(p.teamID, "metal")
             local sECur, sEStor, _, sEInc, sEExp = spGetTeamResources(p.teamID, "energy")
             td.metalIncome = sMInc or 0
             td.energyIncome = sEInc or 0
+            td.metalShare = sMShare or 0
             -- Eco efficiency: how much of income is actually spent (not wasted)
             if (sMInc or 0) > 1 then
                 local mEff = math.min(1.0, (sMExp or 0) / sMInc)
@@ -470,6 +480,9 @@ local function updateTracking(gameSecs)
                 local pCombatHP = 0
                 local pCombatPos = {}
                 local bigBuild = nil
+                local pCommHP, pCommMaxHP, pCommX, pCommZ = 0, 0, nil, nil
+                local pFactoryQueue = ""
+                local pSuperweapon = nil
 
                 for j = 1, #pUnits do
                     local uDefID = spGetUnitDefID(pUnits[j])
@@ -523,6 +536,46 @@ local function updateTracking(gameSecs)
                         elseif ud and (ud.speed or 0) > 0 and not isBuilder(uDefID) then
                             pArmy = pArmy + (ud.metalCost or 0)
                         end
+                        -- Commander tracking
+                        if ud and isCommander(uDefID) then
+                            local cHP, cMaxHP = spGetUnitHealth(pUnits[j])
+                            pCommHP = cHP or 0
+                            pCommMaxHP = cMaxHP or 1
+                            pCommX, _, pCommZ = spGetUnitPosition(pUnits[j])
+                        end
+                        -- Factory queue: first factory's build queue
+                        if ud and ud.isFactory and pFactoryQueue == "" then
+                            local cmds = spGetUnitCommands(pUnits[j], 3)
+                            if cmds then
+                                local qNames = {}
+                                for ci = 1, math.min(#cmds, 3) do
+                                    local cmd = cmds[ci]
+                                    if cmd.id and cmd.id < 0 then
+                                        local bDef = UnitDefs[-cmd.id]
+                                        if bDef then
+                                            local bName = bDef.humanName or bDef.name or "?"
+                                            if string.len(bName) > 10 then bName = string.sub(bName, 1, 9) .. "." end
+                                            qNames[#qNames + 1] = bName
+                                        end
+                                    end
+                                end
+                                pFactoryQueue = table.concat(qNames, ", ")
+                            end
+                        end
+                        -- Superweapon detection (nuke, T3, etc.)
+                        if ud and (ud.metalCost or 0) >= 5000 then
+                            local _, _, _, _, buildProg = spGetUnitHealth(pUnits[j])
+                            if buildProg and buildProg > 0.01 and buildProg < 0.99 then
+                                if not pSuperweapon or (ud.metalCost or 0) > (pSuperweapon.cost or 0) then
+                                    local swName = (ud.humanName and ud.humanName ~= "") and ud.humanName or ud.name or "?"
+                                    pSuperweapon = {
+                                        name = swName,
+                                        cost = ud.metalCost or 0,
+                                        progress = buildProg,
+                                    }
+                                end
+                            end
+                        end
                         -- Detect large builds in progress
                         if ud then
                             local _, _, _, _, buildProg = spGetUnitHealth(pUnits[j])
@@ -566,6 +619,23 @@ local function updateTracking(gameSecs)
                 td.totalArmy = pTotalArmy
                 td.combatHP = pCombatHP
                 td.combatPositions = pCombatPos
+                td.commHP = pCommHP
+                td.commMaxHP = pCommMaxHP
+                td.commX = pCommX
+                td.commZ = pCommZ
+                td.factoryQueue = pFactoryQueue
+                td.superweapon = pSuperweapon
+
+                -- Commander position: front or back?
+                if pCommX then
+                    local mapSizeX = Game.mapSizeX or 8192
+                    local mapSizeZ = Game.mapSizeZ or 8192
+                    local mapCenterZ = mapSizeZ / 2
+                    -- Check if comm is past map center (rough "front" detection)
+                    local startZ = (p.allyTeamID == 0) and 0 or mapSizeZ
+                    local distToStart = math.abs(pCommZ - startZ)
+                    td.commFront = distToStart > mapSizeZ * 0.4
+                end
 
                 -- Army composition string
                 local compParts = {}
@@ -873,6 +943,30 @@ local function checkAlerts(gameSecs)
                     fireAlert(key, S.SPEC_ALERT_COOLDOWN_STALL,
                         p.name .. " METAL OVERFLOW!",
                         1.0, 0.8, 0.0)
+                end
+            end
+
+            -- Commander in danger
+            if td.commHP and td.commMaxHP and td.commMaxHP > 0 then
+                local commPct = td.commHP / td.commMaxHP
+                if commPct < 0.3 and commPct > 0 then
+                    local key = p.teamID .. "_commdanger"
+                    if alertOK(key, 20) then
+                        fireAlert(key, 20,
+                            string.format("%s COMM IN DANGER! %d%%", p.name, math.floor(commPct * 100)),
+                            1.0, 0.1, 0.1, td.commX, nil, td.commZ)
+                    end
+                end
+            end
+
+            -- Superweapon alert
+            if td.superweapon and td.superweapon.progress > 0.7 then
+                local key = p.teamID .. "_superweapon"
+                if alertOK(key, 30) then
+                    fireAlert(key, 30,
+                        string.format("%s %s at %d%%!", p.name, td.superweapon.name,
+                            math.floor(td.superweapon.progress * 100)),
+                        1.0, 0.85, 0.2)
                 end
             end
 
@@ -1638,6 +1732,45 @@ function widget:DrawScreen()
         setColor(C.textDim)
         gl.Text(watchTD.armyComp or "", tx + 170, ty - fontSize, fontSize - 3, "o")
         ty = ty - lineHeight
+
+        -- Commander HP + position + sharing + factory queue
+        local commMaxHP = watchTD.commMaxHP or 1
+        if commMaxHP > 0 and (watchTD.commHP or 0) > 0 then
+            local commPct = watchTD.commHP / commMaxHP * 100
+            if commPct < 30 then gl.Color(1.0, 0.2, 0.1, 1.0)
+            elseif commPct < 60 then gl.Color(1.0, 0.7, 0.2, 1.0)
+            else gl.Color(0.3, 1.0, 0.5, 0.9) end
+            gl.Text(string.format("Comm: %d%%", commPct), tx, ty - fontSize, fontSize - 3, "o")
+            -- Position label
+            setColor(C.textDim)
+            local posLabel = watchTD.commFront and "FRONT" or "base"
+            if watchTD.commFront then gl.Color(1.0, 0.5, 0.2, 0.9) end
+            gl.Text(posLabel, tx + 75, ty - fontSize, fontSize - 3, "o")
+            -- Share
+            if (watchTD.metalShare or 0) > 0.5 then
+                gl.Color(0.5, 0.8, 1.0, 0.8)
+                gl.Text(string.format("Share:+%.0f", watchTD.metalShare), tx + 120, ty - fontSize, fontSize - 3, "o")
+            end
+            ty = ty - lineHeight
+        end
+
+        -- Factory queue
+        if watchTD.factoryQueue and watchTD.factoryQueue ~= "" then
+            setColor(C.textDim)
+            gl.Text("Queue:", tx, ty - fontSize, fontSize - 3, "o")
+            setColor(C.text)
+            gl.Text(watchTD.factoryQueue, tx + 50, ty - fontSize, fontSize - 3, "o")
+            ty = ty - lineHeight
+        end
+
+        -- Superweapon alert
+        if watchTD.superweapon then
+            gl.Color(1.0, 0.85, 0.2, 1.0)
+            gl.Text(string.format("BUILDING: %s %d%%",
+                watchTD.superweapon.name, math.floor(watchTD.superweapon.progress * 100)),
+                tx, ty - fontSize, fontSize - 2, "o")
+            ty = ty - lineHeight
+        end
     end
 
     -- === Team balance ===
