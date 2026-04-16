@@ -382,6 +382,8 @@ local function initPlayerList()
                 buildLog = {},
                 dmgHistory = {},
                 prevMetalKilled = 0,
+                combatHP = 0,
+                combatPositions = {},
             }
         end
     end
@@ -465,6 +467,8 @@ local function updateTracking(gameSecs)
                 local pHasT2 = td.hasT2
                 local pRaider, pAssault, pSkirm, pAir, pAA = 0, 0, 0, 0, 0
                 local pIdleArmy, pTotalArmy = 0, 0
+                local pCombatHP = 0
+                local pCombatPos = {}
                 local bigBuild = nil
 
                 for j = 1, #pUnits do
@@ -490,7 +494,7 @@ local function updateTracking(gameSecs)
                                 pHasT2 = true
                             end
                         end
-                        -- Combat units: army value, composition, idle
+                        -- Combat units: army value, composition, idle, HP, positions
                         if ud and isCombatUnit(uDefID) then
                             pArmy = pArmy + (ud.metalCost or 0)
                             pTotalArmy = pTotalArmy + 1
@@ -504,6 +508,17 @@ local function updateTracking(gameSecs)
                             if isAntiAir(uDefID) then pAA = pAA + 1 end
                             if ud.canMove and isUnitFinished(pUnits[j]) and isUnitIdle(pUnits[j]) then
                                 pIdleArmy = pIdleArmy + 1
+                            end
+                            -- Track combat HP and positions (max 30 for performance)
+                            local cHP, cMaxHP = spGetUnitHealth(pUnits[j])
+                            if cHP and cMaxHP then
+                                pCombatHP = pCombatHP + cHP
+                            end
+                            if #pCombatPos < 30 then
+                                local cx, _, cz = spGetUnitPosition(pUnits[j])
+                                if cx then
+                                    pCombatPos[#pCombatPos + 1] = { x = cx, z = cz, role = role }
+                                end
                             end
                         elseif ud and (ud.speed or 0) > 0 and not isBuilder(uDefID) then
                             pArmy = pArmy + (ud.metalCost or 0)
@@ -549,6 +564,8 @@ local function updateTracking(gameSecs)
                 td.airCount = pAir
                 td.idleArmy = pIdleArmy
                 td.totalArmy = pTotalArmy
+                td.combatHP = pCombatHP
+                td.combatPositions = pCombatPos
 
                 -- Army composition string
                 local compParts = {}
@@ -1155,9 +1172,14 @@ function widget:Update(dt)
 
     local gameSecs = spGetGameSeconds()
 
-    updateTracking(gameSecs)
-    checkAlerts(gameSecs)
-    detectBattles(gameSecs, UPDATE_INTERVAL)
+    local ok, err = pcall(function()
+        updateTracking(gameSecs)
+        checkAlerts(gameSecs)
+        detectBattles(gameSecs, UPDATE_INTERVAL)
+    end)
+    if not ok then
+        Spring.Echo("[Caster] Update error: " .. tostring(err))
+    end
     updateSpecMarkers(UPDATE_INTERVAL)
 
     -- OBS export
@@ -1219,6 +1241,36 @@ function widget:UnitFinished(unitID, unitDefID, unitTeam)
         name = name,
         cost = ud.metalCost or 0,
     }
+end
+
+------------------------------------------------------------------------
+-- widget:TeamDied — player eliminated alert
+------------------------------------------------------------------------
+function widget:TeamDied(teamID)
+    local gameSecs = spGetGameSeconds()
+    local playerName = "Team " .. teamID
+    for _, p in ipairs(S.specPlayerList) do
+        if p.teamID == teamID then
+            playerName = p.name
+            break
+        end
+    end
+    local mins = math.floor(gameSecs / 60)
+    local secs = math.floor(gameSecs % 60)
+    local logText = string.format("%d:%02d %s ELIMINATED!", mins, secs, playerName)
+    S.specAlertLog[#S.specAlertLog + 1] = {
+        text = logText, time = gameSecs, r = 1.0, g = 0.1, b = 0.1,
+    }
+    while #S.specAlertLog > S.SPEC_ALERT_MAX do
+        table.remove(S.specAlertLog, 1)
+    end
+    if #S.specTimeline < S.specTimelineMax then
+        S.specTimeline[#S.specTimeline + 1] = {
+            time = gameSecs, text = playerName .. " eliminated",
+            r = 1.0, g = 0.1, b = 0.1,
+        }
+    end
+    Spring.Echo(string.format("[Caster] %s ELIMINATED at %d:%02d!", playerName, mins, secs))
 end
 
 ------------------------------------------------------------------------
@@ -1573,13 +1625,18 @@ function widget:DrawScreen()
             tx, ty - fontSize, fontSize - 3, "o")
         ty = ty - lineHeight
 
-        -- Army value
+        -- Army value + combat HP
         local armyStr = watchTD.armyValue >= 1000
             and string.format("%.1fk", watchTD.armyValue / 1000)
             or string.format("%d", watchTD.armyValue)
+        local hpStr = (watchTD.combatHP or 0) >= 1000
+            and string.format("%.0fk HP", watchTD.combatHP / 1000)
+            or string.format("%d HP", watchTD.combatHP or 0)
         setColor(C.text)
-        gl.Text(string.format("Army: %s  |  %s", armyStr, watchTD.armyComp or ""),
+        gl.Text(string.format("Army: %s (%s)", armyStr, hpStr),
             tx, ty - fontSize, fontSize - 3, "o")
+        setColor(C.textDim)
+        gl.Text(watchTD.armyComp or "", tx + 170, ty - fontSize, fontSize - 3, "o")
         ty = ty - lineHeight
     end
 
