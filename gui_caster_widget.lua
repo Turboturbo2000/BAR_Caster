@@ -301,12 +301,15 @@ local function initPlayerList()
 
             local faction = detectFaction(teamID)
             local allyTeamID = select(6, Spring.GetTeamInfo(teamID))
+            local tr, tg, tb = Spring.GetTeamColor(teamID)
+            local teamColor = { tr or 1, tg or 1, tb or 1, 1.0 }
 
             S.specPlayerList[#S.specPlayerList + 1] = {
                 teamID = teamID,
                 allyTeamID = allyTeamID,
                 name = playerName,
                 faction = faction,
+                color = teamColor,
             }
 
             -- Initialize tracking data
@@ -1317,13 +1320,13 @@ function widget:DrawScreen()
     gl.Color(0.5, 0.8, 1.0, 0.9)
     gl.Text("<<", tx, ty - fontSize + 1, fontSize, "o")
     gl.Text(">>", x2 - 30, ty - fontSize + 1, fontSize, "o")
-    local watchFaction = ""
     local cur = S.specPlayerList[S.specSelectedIdx]
-    if cur then watchFaction = cur.faction or "" end
-    if watchFaction == "Cortex" then gl.Color(0.5, 0.7, 1.0, 1.0)
-    elseif watchFaction == "Armada" then gl.Color(1.0, 0.7, 0.4, 1.0)
-    elseif watchFaction == "Legion" then gl.Color(0.7, 1.0, 0.5, 1.0)
-    else setColor(C.text) end
+    local watchFaction = cur and cur.faction or ""
+    if cur and cur.color then
+        setColor(cur.color)
+    else
+        setColor(C.text)
+    end
     gl.Text(string.format("%s (%s)", S.specWatchName or "?", watchFaction),
         tx + 30, ty - fontSize + 1, fontSize, "o")
     ty = ty - 24
@@ -1607,7 +1610,7 @@ function widget:DrawScreen()
                 local killed = td.metalKilled or 0
                 local lost = td.metalLost or 0
                 ranked[#ranked + 1] = {
-                    name = p.name, faction = p.faction, teamID = p.teamID,
+                    name = p.name, faction = p.faction, teamID = p.teamID, color = p.color,
                     metal = td.metalIncome, mex = td.mexCount,
                     hasT2 = td.hasT2, army = td.armyValue,
                     armyComp = td.armyComp or "",
@@ -1633,11 +1636,12 @@ function widget:DrawScreen()
             setColor(C.textDim)
             gl.Text(string.format("%d.", i), tx, ty - fontSize, fontSize - 3, "o")
 
-            -- Name (colored by faction)
-            if r.faction == "Cortex" then gl.Color(0.5, 0.7, 1.0, 1.0)
-            elseif r.faction == "Armada" then gl.Color(1.0, 0.7, 0.4, 1.0)
-            elseif r.faction == "Legion" then gl.Color(0.7, 1.0, 0.5, 1.0)
-            else setColor(C.text) end
+            -- Name (colored by in-game team color)
+            if r.color then
+                setColor(r.color)
+            else
+                setColor(C.text)
+            end
             local nameStr = r.name
             if string.len(nameStr) > 14 then nameStr = string.sub(nameStr, 1, 13) .. ".." end
             gl.Text(nameStr, tx + 18, ty - fontSize, fontSize - 3, "o")
