@@ -241,9 +241,9 @@ local function drawSpecMarkers()
             local text = m.label
             local textW = gl.GetTextWidth(text) * SPEC_MARKER_FONT
             -- Background
-            gl.Color(0.0, 0.05, 0.1, 0.75 * fade)
-            gl.Rect(sx - textW/2 - 10, sy + SPEC_MARKER_FONT + 6,
-                     sx + textW/2 + 10, sy - 6)
+            RENDERING.drawMarkerBg(
+                sx - textW/2 - 10, sy - 6,
+                sx + textW/2 + 10, sy + SPEC_MARKER_FONT + 6, fade)
             -- Colored top border
             gl.Color(m.r, m.g, m.b, 0.9 * fade * pulse)
             gl.Rect(sx - textW/2 - 10, sy + SPEC_MARKER_FONT + 6,
@@ -1008,6 +1008,7 @@ function widget:Initialize()
 
     -- Load modules
     RENDERING = VFS.Include("LuaUI/Widgets/caster_modules/rendering.lua")
+    RENDERING.initFlowUI()
 
     local UC = VFS.Include("LuaUI/Widgets/caster_modules/unit_classify.lua").init({
         S = S, artyNames = artyNames,
@@ -1032,6 +1033,10 @@ function widget:Initialize()
     -- Initialize player list
     initPlayerList()
 
+    if RENDERING.hasFlowUI() then
+        Spring.Echo("[Caster] FlowUI detected — using rounded UI style")
+    end
+
     Spring.Echo("[Caster] BAR Caster Widget v1.0 loaded (F9=Toggle, PageUp/PageDown=Switch Player)")
 end
 
@@ -1045,6 +1050,9 @@ end
 function widget:ViewResize(newX, newY)
     vsx = newX
     vsy = newY
+    if RENDERING then
+        RENDERING.initFlowUI()
+    end
 end
 
 ------------------------------------------------------------------------
@@ -1257,6 +1265,10 @@ local function drawSectionBg(lx1, ly1, lx2, ly2)
     RENDERING.drawSectionBg(lx1, ly1, lx2, ly2, C.bgLight)
 end
 
+local function drawHighlight(x1, y1, x2, y2)
+    RENDERING.drawHighlight(x1, y1, x2, y2)
+end
+
 ------------------------------------------------------------------------
 -- widget:DrawScreen — main panel rendering
 ------------------------------------------------------------------------
@@ -1284,11 +1296,8 @@ function widget:DrawScreen()
 
     -- Panel background (drawn first using cached height from previous frame)
     local startY = ty
-    gl.Color(C.bg[1], C.bg[2], C.bg[3], C.bg[4])
-    gl.Rect(x1, py, x2, py - lastPanelHeight)
-    -- Top accent line
-    gl.Color(0.4, 0.6, 1.0, 0.6)
-    gl.Rect(x1, py, x2, py - 2)
+    RENDERING.drawPanel(x1, py - lastPanelHeight, x2, py)
+    RENDERING.drawAccentLine(x1, py, x2)
 
     -- === Title ===
     setColor(C.title)
@@ -1367,14 +1376,7 @@ function widget:DrawScreen()
         local barY2 = ty - barH
         local balPct = S.specBalancePct / 100
 
-        gl.Color(0.1, 0.1, 0.15, 0.8)
-        gl.Rect(barX1, ty, barX2, barY2)
-        gl.Color(0.3, 0.5, 1.0, 0.7)
-        gl.Rect(barX1, ty, barX1 + barW * balPct, barY2)
-        gl.Color(1.0, 0.4, 0.3, 0.7)
-        gl.Rect(barX1 + barW * balPct, ty, barX2, barY2)
-        gl.Color(1, 1, 1, 0.4)
-        gl.Rect(barX1 + barW * 0.5 - 1, ty, barX1 + barW * 0.5 + 1, barY2)
+        RENDERING.drawBalanceBar(barX1, ty, barX2, barY2, balPct)
 
         if S.specBalanceLabel ~= "" then
             local diff = math.abs(S.specBalancePct - 50)
@@ -1457,8 +1459,7 @@ function widget:DrawScreen()
         local ally1 = S.specTeamBalance[1].allyTeamID
         local ally2 = S.specTeamBalance[2].allyTeamID
 
-        gl.Color(0.05, 0.05, 0.08, 0.6)
-        gl.Rect(tx, ty, tx + mapW, ty - mapH)
+        RENDERING.drawMapBg(tx, ty - mapH, tx + mapW, ty)
 
         for gKey, gData in pairs(S.specControlGrid) do
             local gx, gz = gKey:match("^(-?%d+)_(-?%d+)$")
@@ -1625,8 +1626,7 @@ function widget:DrawScreen()
             local r = ranked[i]
             local isSelected = (r.teamID == S.specWatchTeamID)
             if isSelected then
-                gl.Color(0.15, 0.25, 0.40, 0.6)
-                gl.Rect(x1 + 4, ty + 2, x2 - 4, ty - fontSize - 2)
+                drawHighlight(x1 + 4, ty - fontSize - 2, x2 - 4, ty + 2)
             end
 
             -- Rank
@@ -1766,8 +1766,7 @@ function widget:DrawScreen()
         local gameSecs = spGetGameSeconds()
         local maxTime = math.max(gameSecs, 60)
 
-        gl.Color(0.08, 0.08, 0.12, 0.7)
-        gl.Rect(tx, ty, tx + tlW, ty - tlH)
+        RENDERING.drawTimelineBg(tx, ty - tlH, tx + tlW, ty)
 
         for mins = 5, math.floor(maxTime / 60), 5 do
             local tickX = tx + (mins * 60 / maxTime) * tlW
