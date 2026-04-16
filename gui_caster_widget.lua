@@ -178,6 +178,11 @@ S.specOBSTimer  = 0
 S.gameOver = false
 S.specMVPs = {}
 
+-- Wow moments tracking
+S.specBiggestKill      = nil  -- { name, unitName, cost, time }
+S.specPrevEcoLeader    = nil  -- player name of eco leader
+S.specPrevCommHP       = {}   -- teamID -> previous comm HP %
+
 -- Panel drag
 local panelDragging    = false
 local panelDragOffsetX = 0
@@ -1038,6 +1043,22 @@ local function checkAlerts(gameSecs)
                 end
             end
 
+            -- Clutch moment: commander survives at very low HP
+            if td.commHP and td.commMaxHP and td.commMaxHP > 0 then
+                local commPct = td.commHP / td.commMaxHP
+                local prevPct = S.specPrevCommHP[p.teamID] or 1.0
+                -- Was below 20% but survived (HP going back up or stable)
+                if prevPct < 0.20 and commPct >= prevPct and commPct > 0.05 then
+                    local key = p.teamID .. "_clutch"
+                    if alertOK(key, 30) then
+                        fireAlert(key, 30,
+                            string.format("%s CLUTCH! Comm survived at %d%%!", p.name, math.floor(prevPct * 100)),
+                            0.3, 1.0, 0.8)
+                    end
+                end
+                S.specPrevCommHP[p.teamID] = commPct
+            end
+
             -- Counter detection: no AA but enemy has air
             if td.noAA and gameSecs > 180 then
                 -- Check if any enemy has air units
@@ -1090,6 +1111,29 @@ local function checkAlerts(gameSecs)
             S.specComebackAlerted = false
         end
         S.specPrevBalancePct = S.specBalancePct
+    end
+
+    -- Eco crossover: detect when one player overtakes another in metal income
+    if gameSecs > 120 and gameSecs % 5 < 2 then
+        -- Find current eco leader
+        local bestIncome = 0
+        local bestName = nil
+        for _, p in ipairs(S.specPlayerList) do
+            local td = S.specAllData[p.teamID]
+            if td and td.metalIncome > bestIncome then
+                bestIncome = td.metalIncome
+                bestName = p.name
+            end
+        end
+        if bestName and S.specPrevEcoLeader and bestName ~= S.specPrevEcoLeader then
+            local key = "ecocross_" .. gameSecs
+            if alertOK(key, 30) then
+                fireAlert(key, 30,
+                    bestName .. " overtakes " .. S.specPrevEcoLeader .. " in eco! (+" .. math.floor(bestIncome) .. "/s)",
+                    0.2, 0.9, 1.0)
+            end
+        end
+        S.specPrevEcoLeader = bestName
     end
 end
 
@@ -1453,6 +1497,43 @@ function widget:UnitDestroyed(unitID, unitDefID, unitTeam,
             if tdKill then
                 tdKill.metalKilled = (tdKill.metalKilled or 0) + cost
             end
+
+            -- Biggest single kill tracking
+            if cost >= 2000 then
+                local gameSecs = spGetGameSeconds()
+                if not S.specBiggestKill or cost > S.specBiggestKill.cost then
+                    local killerName = "?"
+                    for _, p in ipairs(S.specPlayerList) do
+                        if p.teamID == attackerTeam then killerName = p.name; break end
+                    end
+                    local unitName = (ud.humanName and ud.humanName ~= "") and ud.humanName or ud.name or "?"
+                    S.specBiggestKill = {
+                        name = killerName, unitName = unitName,
+                        cost = cost, time = gameSecs,
+                    }
+                    local costStr = cost >= 1000 and string.format("%.1fk", cost / 1000) or tostring(cost)
+                    -- Alert for very expensive kills
+                    if cost >= 5000 then
+                        local key = "bigkill_" .. gameSecs
+                        S.specAlertLog[#S.specAlertLog + 1] = {
+                            text = string.format("%d:%02d %s destroyed %s (%s metal)!",
+                                math.floor(gameSecs/60), math.floor(gameSecs%60),
+                                killerName, unitName, costStr),
+                            time = gameSecs, r = 1.0, g = 0.85, b = 0.2,
+                        }
+                        while #S.specAlertLog > S.SPEC_ALERT_MAX do
+                            table.remove(S.specAlertLog, 1)
+                        end
+                        if #S.specTimeline < S.specTimelineMax then
+                            S.specTimeline[#S.specTimeline + 1] = {
+                                time = gameSecs,
+                                text = killerName .. " killed " .. unitName,
+                                r = 1.0, g = 0.85, b = 0.2,
+                            }
+                        end
+                    end
+                end
+            end
         end
     end
 end
@@ -1519,6 +1600,12 @@ function widget:GameOver(winningAllyTeams)
         S.specMVPs[#S.specMVPs + 1] = {
             category = "1st T2", name = bestT2.name,
             label = string.format("%d:%02d", m, s),
+        }
+    end
+    if S.specBiggestKill then
+        S.specMVPs[#S.specMVPs + 1] = {
+            category = "Biggest Kill", name = S.specBiggestKill.name,
+            label = string.format("%s (%s metal)", S.specBiggestKill.unitName, fmtK(S.specBiggestKill.cost)),
         }
     end
 
