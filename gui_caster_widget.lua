@@ -370,6 +370,7 @@ local function initPlayerList()
                 metalKilled = 0,
                 metalLost = 0,
                 reclaimIncome = 0,
+                ecoEfficiency = 0,
                 raiderCount = 0,
                 assaultCount = 0,
                 skirmCount = 0,
@@ -424,10 +425,21 @@ local function updateTracking(gameSecs)
     for _, p in ipairs(S.specPlayerList) do
         local td = S.specAllData[p.teamID]
         if td then
-            local sMCur, sMStor, _, sMInc = spGetTeamResources(p.teamID, "metal")
-            local sECur, sEStor, _, sEInc = spGetTeamResources(p.teamID, "energy")
+            local sMCur, sMStor, _, sMInc, sMExp = spGetTeamResources(p.teamID, "metal")
+            local sECur, sEStor, _, sEInc, sEExp = spGetTeamResources(p.teamID, "energy")
             td.metalIncome = sMInc or 0
             td.energyIncome = sEInc or 0
+            -- Eco efficiency: how much of income is actually spent (not wasted)
+            if (sMInc or 0) > 1 then
+                local mEff = math.min(1.0, (sMExp or 0) / sMInc)
+                -- Overflow: storage nearly full = wasting metal
+                if sMCur and sMStor and sMStor > 0 and sMCur / sMStor > 0.9 then
+                    mEff = math.min(mEff, 0.7)
+                end
+                td.ecoEfficiency = math.floor(mEff * 100 + 0.5)
+            else
+                td.ecoEfficiency = 0
+            end
             td.faction = p.faction
             if td.metalIncome > td.peakMetal then td.peakMetal = td.metalIncome end
             if td.energyIncome > td.peakEnergy then td.peakEnergy = td.energyIncome end
@@ -1421,6 +1433,12 @@ function widget:DrawScreen()
         gl.Text(string.format("Metal: +%.0f/s", watchTD.metalIncome), tx, ty - fontSize, fontSize - 2, "o")
         gl.Color(1.0, 1.0, 0.3, 1.0)
         gl.Text(string.format("Energy: +%.0f/s", watchTD.energyIncome), tx + 130, ty - fontSize, fontSize - 2, "o")
+        -- Eco efficiency
+        local eff = watchTD.ecoEfficiency or 0
+        if eff >= 85 then gl.Color(0.3, 1.0, 0.5, 0.9)
+        elseif eff >= 60 then gl.Color(1.0, 0.8, 0.2, 0.9)
+        else gl.Color(1.0, 0.4, 0.3, 0.9) end
+        gl.Text(string.format("%d%%", eff), x2 - 40, ty - fontSize, fontSize - 2, "o")
         ty = ty - lineHeight
 
         setColor(C.textDim)
@@ -1702,6 +1720,7 @@ function widget:DrawScreen()
                     metalKilled = killed, metalLost = lost,
                     trade = killed - lost,
                     reclaim = td.reclaimIncome or 0,
+                    ecoEff = td.ecoEfficiency or 0,
                 }
             end
         end
@@ -1744,10 +1763,16 @@ function widget:DrawScreen()
             if sortKey == "mex" then gl.Color(0.4, 1.0, 0.9, 1.0) else setColor(C.textDim) end
             gl.Text(string.format("%dM", r.mex), tx + 195, ty - fontSize, fontSize - 3, "o")
 
+            -- Eco efficiency
+            if r.ecoEff >= 85 then gl.Color(0.3, 1.0, 0.5, 0.7)
+            elseif r.ecoEff >= 60 then gl.Color(1.0, 0.8, 0.2, 0.7)
+            else gl.Color(1.0, 0.4, 0.3, 0.7) end
+            gl.Text(string.format("%d%%", r.ecoEff), tx + 213, ty - fontSize, fontSize - 4, "o")
+
             -- T2
             if r.hasT2 then
                 gl.Color(0.3, 1.0, 0.8, 1.0)
-                gl.Text("T2", tx + 218, ty - fontSize, fontSize - 3, "o")
+                gl.Text("T2", tx + 238, ty - fontSize, fontSize - 3, "o")
             end
 
             -- Army value + idle
@@ -1757,7 +1782,7 @@ function widget:DrawScreen()
                     if idlePct > 50 then gl.Color(1.0, 0.3, 0.2, 1.0)
                     elseif idlePct > 25 then gl.Color(1.0, 0.5, 0.1, 1.0)
                     else gl.Color(1.0, 0.8, 0.2, 0.9) end
-                    gl.Text(string.format("%d%%z", math.floor(idlePct)), tx + 238, ty - fontSize, fontSize - 4, "o")
+                    gl.Text(string.format("%d%%z", math.floor(idlePct)), tx + 258, ty - fontSize, fontSize - 4, "o")
                 end
                 if sortKey == "army" then gl.Color(0.4, 1.0, 0.9, 1.0) else setColor(C.textDim) end
                 local armyStr = r.army >= 1000
