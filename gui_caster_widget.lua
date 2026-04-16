@@ -188,6 +188,7 @@ local settings = {
     showRanking      = true,
     showAlerts       = true,
     showTimeline     = true,
+    showBuildLog     = true,
     showMVPs         = true,
 }
 local settingsOrder = {
@@ -200,6 +201,7 @@ local settingsOrder = {
     { key = "showRanking",      label = "Player Ranking" },
     { key = "showAlerts",       label = "Event Log" },
     { key = "showTimeline",     label = "Timeline" },
+    { key = "showBuildLog",     label = "Build Log" },
     { key = "showMVPs",         label = "MVPs" },
 }
 local settingsWidthY  = 0
@@ -375,6 +377,7 @@ local function initPlayerList()
                 assaultCount = 0,
                 skirmCount = 0,
                 armyCompHistory = {},
+                buildLog = {},
             }
         end
     end
@@ -1155,6 +1158,30 @@ function widget:Update(dt)
 end
 
 ------------------------------------------------------------------------
+-- widget:UnitFinished — track build order per team
+------------------------------------------------------------------------
+function widget:UnitFinished(unitID, unitDefID, unitTeam)
+    if not unitDefID or not unitTeam then return end
+    local td = S.specAllData[unitTeam]
+    if not td then return end
+    local ud = UnitDefs[unitDefID]
+    if not ud then return end
+    -- Only log notable buildings: factories, mex, nanos, expensive structures
+    local dominated = ud.isFactory or isMex(unitDefID) or isNano(unitDefID)
+        or (ud.metalCost or 0) >= 500
+    if not dominated then return end
+    local gameSecs = spGetGameSeconds()
+    local name = (ud.humanName and ud.humanName ~= "") and ud.humanName or ud.name or "?"
+    local log = td.buildLog
+    if #log >= 30 then table.remove(log, 1) end
+    log[#log + 1] = {
+        time = gameSecs,
+        name = name,
+        cost = ud.metalCost or 0,
+    }
+end
+
+------------------------------------------------------------------------
 -- widget:UnitDestroyed — track kills/losses per team
 ------------------------------------------------------------------------
 function widget:UnitDestroyed(unitID, unitDefID, unitTeam,
@@ -1691,6 +1718,38 @@ function widget:DrawScreen()
                 gl.Text(item[1], tx + (li - 1) * 40, ty - fontSize + 2, fontSize - 4, "o")
             end
             ty = ty - lineHeight + 2
+        end
+    end
+
+    -- === Build log of watched player ===
+    if S.specWatchTeamID and settings.showBuildLog then
+        local watchBL = S.specAllData[S.specWatchTeamID]
+        if watchBL and watchBL.buildLog and #watchBL.buildLog > 0 then
+            drawDivider(x1 + 8, ty, x2 - 8)
+            ty = ty - 6
+            setColor(C.sectionHead)
+            gl.Text("BUILD LOG: " .. (S.specWatchName or "?"), tx, ty - fontSize, fontSize - 2, "o")
+            ty = ty - lineHeight
+
+            local log = watchBL.buildLog
+            local showFrom = math.max(1, #log - 7)
+            for i = #log, showFrom, -1 do
+                local entry = log[i]
+                local m = math.floor(entry.time / 60)
+                local s = math.floor(entry.time % 60)
+                setColor(C.textDim)
+                gl.Text(string.format("%d:%02d", m, s), tx, ty - fontSize, fontSize - 3, "o")
+                if entry.cost >= 2000 then gl.Color(1.0, 0.85, 0.2, 1.0)
+                elseif entry.cost >= 500 then gl.Color(0.3, 1.0, 0.8, 0.9)
+                else setColor(C.text) end
+                local bName = entry.name
+                if string.len(bName) > 22 then bName = string.sub(bName, 1, 21) .. ".." end
+                gl.Text(bName, tx + 40, ty - fontSize, fontSize - 3, "o")
+                setColor(C.textDim)
+                gl.Text(string.format("%dk", math.floor(entry.cost / 100) / 10), x2 - 45, ty - fontSize, fontSize - 4, "o")
+                ty = ty - lineHeight + 4
+            end
+            ty = ty - 2
         end
     end
 
