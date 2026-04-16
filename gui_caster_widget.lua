@@ -668,7 +668,7 @@ local function updateTracking(gameSecs)
         h[GRAPH_HISTORY] = tb.metal
     end
 
-    -- Balance percentage
+    -- Balance percentage and win prediction
     if #S.specTeamBalance >= 2 then
         local t1 = S.specTeamBalance[1]
         local t2 = S.specTeamBalance[2]
@@ -676,7 +676,35 @@ local function updateTracking(gameSecs)
         local totalArmy  = t1.army + t2.army
         local ecoPct  = totalMetal > 0 and (t1.metal / totalMetal * 100) or 50
         local armyPct = totalArmy > 0  and (t1.army / totalArmy * 100)   or 50
-        S.specBalancePct = math.floor((ecoPct + armyPct) / 2 + 0.5)
+
+        -- Territory control factor
+        local terrPct = 50
+        if S.specControlGrid then
+            local a1 = t1.allyTeamID
+            local a2 = t2.allyTeamID
+            local ctrl1, ctrl2 = 0, 0
+            for _, gData in pairs(S.specControlGrid) do
+                local c1 = gData[a1] or 0
+                local c2 = gData[a2] or 0
+                if c1 > c2 then ctrl1 = ctrl1 + 1
+                elseif c2 > c1 then ctrl2 = ctrl2 + 1 end
+            end
+            local totalCtrl = ctrl1 + ctrl2
+            terrPct = totalCtrl > 0 and (ctrl1 / totalCtrl * 100) or 50
+        end
+
+        -- T2 advantage factor
+        local t2Pct = 50
+        local totalT2 = t1.t2Count + t2.t2Count
+        if totalT2 > 0 then
+            t2Pct = t1.t2Count / totalT2 * 100
+        end
+
+        -- Weighted win prediction: eco 30%, army 35%, territory 20%, tech 15%
+        S.specBalancePct = math.floor(
+            ecoPct * 0.30 + armyPct * 0.35 + terrPct * 0.20 + t2Pct * 0.15 + 0.5)
+        S.specBalancePct = math.max(5, math.min(95, S.specBalancePct))
+
         local diff = math.abs(S.specBalancePct - 50)
         if diff <= 5 then S.specBalanceLabel = "balanced"
         elseif diff <= 15 then S.specBalanceLabel = "slight advantage"
@@ -1503,6 +1531,18 @@ function widget:DrawScreen()
         ty = ty - 6
         setColor(C.sectionHead)
         gl.Text("TEAM BALANCE", tx, ty - fontSize, fontSize - 2, "o")
+        -- Win prediction percentage
+        local winPct = S.specBalancePct
+        if winPct > 50 then
+            gl.Color(0.3, 0.5, 1.0, 0.9)
+            gl.Text(string.format("T1 %d%%", winPct), x2 - 60, ty - fontSize, fontSize - 3, "o")
+        elseif winPct < 50 then
+            gl.Color(1.0, 0.4, 0.3, 0.9)
+            gl.Text(string.format("T2 %d%%", 100 - winPct), x2 - 60, ty - fontSize, fontSize - 3, "o")
+        else
+            setColor(C.textDim)
+            gl.Text("50/50", x2 - 50, ty - fontSize, fontSize - 3, "o")
+        end
         ty = ty - lineHeight
 
         local t1 = S.specTeamBalance[1]
