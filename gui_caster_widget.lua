@@ -1307,12 +1307,62 @@ function widget:GameOver(winningAllyTeams)
         }
     end
 
+    -- === Full game summary ===
+    local gameSecs = spGetGameSeconds()
+    local gm = math.floor(gameSecs / 60)
+    local gs = math.floor(gameSecs % 60)
+    Spring.Echo("[Caster] ========================================")
+    Spring.Echo(string.format("[Caster] GAME SUMMARY — Duration: %d:%02d", gm, gs))
+    Spring.Echo("[Caster] ========================================")
+
+    -- Team results
+    if #S.specTeamBalance >= 2 then
+        for _, tb in ipairs(S.specTeamBalance) do
+            local fmtArmy = tb.army >= 1000 and string.format("%.1fk", tb.army / 1000) or string.format("%d", tb.army)
+            Spring.Echo(string.format("[Caster] Team %d (%dp): +%.0f M/s | %s Army | %d Mex | %dxT2",
+                tb.allyTeamID, tb.players, tb.metal, fmtArmy, tb.mex, tb.t2Count))
+        end
+        Spring.Echo(string.format("[Caster] Win prediction at end: T1 %d%% — %s",
+            S.specBalancePct, S.specBalanceLabel))
+    end
+
+    -- Per-player stats
+    Spring.Echo("[Caster] --- Player Stats ---")
+    for _, p in ipairs(S.specPlayerList) do
+        local td = S.specAllData[p.teamID]
+        if td then
+            local tradeVal = (td.metalKilled or 0) - (td.metalLost or 0)
+            local tradeStr = math.abs(tradeVal) >= 1000
+                and string.format("%+.1fk", tradeVal / 1000)
+                or string.format("%+d", tradeVal)
+            Spring.Echo(string.format("[Caster]   %s (%s): Peak +%.0fM/s | %d Mex | Army %.0fk | Trade %s | Eff %d%%",
+                p.name, p.faction,
+                td.peakMetal, td.mexCount,
+                td.armyValue / 1000, tradeStr,
+                td.ecoEfficiency or 0))
+        end
+    end
+
+    -- T2 race
+    if #S.specT2List > 0 then
+        Spring.Echo("[Caster] --- T2 Race ---")
+        for i, t2 in ipairs(S.specT2List) do
+            local m = math.floor(t2.time / 60)
+            local s = math.floor(t2.time % 60)
+            Spring.Echo(string.format("[Caster]   %d. %s (%s) at %d:%02d",
+                i, t2.name, t2.faction, m, s))
+        end
+    end
+
+    -- MVPs
     if #S.specMVPs > 0 then
-        Spring.Echo("[Caster] === MVPs ===")
+        Spring.Echo("[Caster] --- MVPs ---")
         for _, mvp in ipairs(S.specMVPs) do
             Spring.Echo(string.format("[Caster]   %s: %s (%s)", mvp.category, mvp.name, mvp.label))
         end
     end
+
+    Spring.Echo("[Caster] ========================================")
 end
 
 ------------------------------------------------------------------------
@@ -1332,6 +1382,14 @@ function widget:KeyPress(key, mods, isRepeat)
     if key == 0x011A then  -- PageDown
         selectPlayer(S.specSelectedIdx + 1)
         return true
+    end
+    -- Number keys 1-8: jump to player (Ctrl+1 through Ctrl+8)
+    if mods and mods.ctrl and key >= 0x0031 and key <= 0x0038 then
+        local idx = key - 0x0030  -- '1' = 0x31 -> idx 1
+        if idx >= 1 and idx <= #S.specPlayerList then
+            selectPlayer(idx)
+            return true
+        end
     end
     return false
 end
