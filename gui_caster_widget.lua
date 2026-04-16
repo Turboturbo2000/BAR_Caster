@@ -205,6 +205,9 @@ local settingsOrder = {
 local settingsWidthY  = 0
 local settingsWidthY2 = 0
 
+-- Territory map click area (updated each frame)
+local territoryArea = nil  -- { x1, y1, x2, y2, mapW, mapH }
+
 ------------------------------------------------------------------------
 -- Load modules
 ------------------------------------------------------------------------
@@ -1522,11 +1525,12 @@ function widget:DrawScreen()
     end
 
     -- === Territory control ===
+    territoryArea = nil
     if S.specControlCols > 0 and #S.specTeamBalance >= 2 and settings.showTerritory then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
-        gl.Text("TERRITORY CONTROL", tx, ty - fontSize, fontSize - 2, "o")
+        gl.Text("TERRITORY CONTROL (click to jump)", tx, ty - fontSize, fontSize - 2, "o")
         ty = ty - lineHeight
 
         local cols = S.specControlCols
@@ -1534,6 +1538,8 @@ function widget:DrawScreen()
         local mapW = panelWidth - 30
         local mapH = math.floor(mapW * rows / cols)
         if mapH > 60 then mapH = 60 end
+        -- Store area for click detection
+        territoryArea = { x1 = tx, y1 = ty - mapH, x2 = tx + mapW, y2 = ty }
         local cellW = mapW / cols
         local cellH = mapH / rows
         local ally1 = S.specTeamBalance[1].allyTeamID
@@ -1939,6 +1945,20 @@ function widget:MousePress(mx, my, button)
                 return true
             end
         end
+    end
+
+    -- Territory map click: jump camera to map position
+    if territoryArea and mx >= territoryArea.x1 and mx <= territoryArea.x2
+       and my >= territoryArea.y1 and my <= territoryArea.y2 then
+        local mapSizeX = Game.mapSizeX or 8192
+        local mapSizeZ = Game.mapSizeZ or 8192
+        local relX = (mx - territoryArea.x1) / (territoryArea.x2 - territoryArea.x1)
+        local relZ = 1.0 - (my - territoryArea.y1) / (territoryArea.y2 - territoryArea.y1)
+        local worldX = relX * mapSizeX
+        local worldZ = relZ * mapSizeZ
+        local worldY = Spring.GetGroundHeight(worldX, worldZ) or 0
+        Spring.SetCameraTarget(worldX, worldY, worldZ, 1.0)
+        return true
     end
 
     -- Title bar drag
