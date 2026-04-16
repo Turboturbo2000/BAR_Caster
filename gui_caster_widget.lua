@@ -403,6 +403,7 @@ local function initPlayerList()
                 commHP = 0,
                 commMaxHP = 0,
                 commX = nil,
+                commY = nil,
                 commZ = nil,
                 commFront = false,
                 factoryQueue = "",
@@ -497,7 +498,7 @@ local function updateTracking(gameSecs)
                 local pCombatHP = 0
                 local pCombatPos = {}
                 local bigBuild = nil
-                local pCommHP, pCommMaxHP, pCommX, pCommZ = 0, 0, nil, nil
+                local pCommHP, pCommMaxHP, pCommX, pCommY, pCommZ = 0, 0, nil, nil, nil
                 local pFactoryQueue = ""
                 local pSuperweapon = nil
 
@@ -562,7 +563,7 @@ local function updateTracking(gameSecs)
                             local cHP, cMaxHP = spGetUnitHealth(pUnits[j])
                             pCommHP = cHP or 0
                             pCommMaxHP = cMaxHP or 1
-                            pCommX, _, pCommZ = spGetUnitPosition(pUnits[j])
+                            pCommX, pCommY, pCommZ = spGetUnitPosition(pUnits[j])
                         end
                         -- Factory queue: first factory's build queue
                         if ud and ud.isFactory and pFactoryQueue == "" then
@@ -643,6 +644,7 @@ local function updateTracking(gameSecs)
                 td.commHP = pCommHP
                 td.commMaxHP = pCommMaxHP
                 td.commX = pCommX
+                td.commY = pCommY
                 td.commZ = pCommZ
                 td.factoryQueue = pFactoryQueue
                 td.superweapon = pSuperweapon
@@ -978,7 +980,7 @@ local function checkAlerts(gameSecs)
                     if alertOK(key, 20) then
                         fireAlert(key, 20,
                             string.format("%s COMM IN DANGER! %d%%", p.name, math.floor(commPct * 100)),
-                            1.0, 0.1, 0.1, td.commX, nil, td.commZ)
+                            1.0, 0.1, 0.1, td.commX, td.commY, td.commZ)
                     end
                 end
             end
