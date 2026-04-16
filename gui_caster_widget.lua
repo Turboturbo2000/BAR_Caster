@@ -189,6 +189,7 @@ local settings = {
     showAlerts       = true,
     showTimeline     = true,
     showBuildLog     = true,
+    showDamageGraph  = true,
     showMVPs         = true,
 }
 local settingsOrder = {
@@ -202,6 +203,7 @@ local settingsOrder = {
     { key = "showAlerts",       label = "Event Log" },
     { key = "showTimeline",     label = "Timeline" },
     { key = "showBuildLog",     label = "Build Log" },
+    { key = "showDamageGraph",  label = "Damage Graph" },
     { key = "showMVPs",         label = "MVPs" },
 }
 local settingsWidthY  = 0
@@ -378,6 +380,8 @@ local function initPlayerList()
                 skirmCount = 0,
                 armyCompHistory = {},
                 buildLog = {},
+                dmgHistory = {},
+                prevMetalKilled = 0,
             }
         end
     end
@@ -564,6 +568,14 @@ local function updateTracking(gameSecs)
                     raider = pRaider, assault = pAssault,
                     skirm = pSkirm, air = pAir,
                 }
+
+                -- Damage dealt per second (kills delta)
+                local curKills = td.metalKilled or 0
+                local dmgPerSec = curKills - (td.prevMetalKilled or 0)
+                td.prevMetalKilled = curKills
+                local dh = td.dmgHistory
+                if #dh >= GRAPH_HISTORY then table.remove(dh, 1) end
+                dh[#dh + 1] = dmgPerSec
 
                 -- T2 detection
                 if pHasT2 and not td.hasT2 then
@@ -1750,6 +1762,59 @@ function widget:DrawScreen()
                 ty = ty - lineHeight + 4
             end
             ty = ty - 2
+        end
+    end
+
+    -- === Damage graph (top 4 players, kills/s over time) ===
+    if #S.specPlayerList > 1 and settings.showDamageGraph then
+        local dmgRanked = {}
+        for _, p in ipairs(S.specPlayerList) do
+            local td = S.specAllData[p.teamID]
+            if td and td.dmgHistory and #td.dmgHistory >= 3 then
+                dmgRanked[#dmgRanked + 1] = {
+                    name = p.name, kills = td.metalKilled or 0,
+                    history = td.dmgHistory,
+                }
+            end
+        end
+        if #dmgRanked >= 2 then
+            table.sort(dmgRanked, function(a, b) return a.kills > b.kills end)
+            drawDivider(x1 + 8, ty, x2 - 8)
+            ty = ty - 6
+            setColor(C.sectionHead)
+            gl.Text("DAMAGE DEALT (kills/s, 30s)", tx, ty - fontSize, fontSize - 2, "o")
+            ty = ty - lineHeight
+
+            local dmgColors = {
+                {1.0, 0.3, 0.2}, {0.3, 0.7, 1.0},
+                {1.0, 0.8, 0.2}, {0.3, 1.0, 0.5},
+            }
+            local dmgSeries = {}
+            local maxShow = math.min(#dmgRanked, 4)
+            local dmgPeak = 1
+            for i = 1, maxShow do
+                dmgSeries[i] = { data = dmgRanked[i].history, color = dmgColors[i], label = dmgRanked[i].name }
+                for j = 1, #dmgRanked[i].history do
+                    if dmgRanked[i].history[j] > dmgPeak then dmgPeak = dmgRanked[i].history[j] end
+                end
+            end
+
+            RENDERING.drawMultiLineGraph(tx, ty, panelWidth - 30, 40, dmgSeries, dmgPeak)
+            ty = ty - 44
+
+            local legColW = math.floor((panelWidth - 30) / 2)
+            for i = 1, maxShow do
+                local c = dmgColors[i]
+                local nameStr = dmgRanked[i].name
+                if string.len(nameStr) > 8 then nameStr = string.sub(nameStr, 1, 7) .. ".." end
+                local col = (i - 1) % 2
+                local legX = tx + col * legColW
+                if i == 3 then ty = ty - lineHeight + 4 end
+                gl.Color(c[1], c[2], c[3], 1.0)
+                gl.Rect(legX, ty - 1, legX + 8, ty - 7)
+                gl.Text(string.format("%s", nameStr), legX + 11, ty - fontSize + 2, fontSize - 4, "o")
+            end
+            ty = ty - lineHeight + 2
         end
     end
 
