@@ -176,6 +176,35 @@ local panelPosX        = nil
 local panelPosY        = nil
 local lastPanelHeight  = 400  -- cached height for background rendering
 
+-- Settings panel
+local settingsOpen = false
+local settings = {
+    showPlayerStats  = true,
+    showTeamBalance  = true,
+    showTeamEcoGraph = true,
+    showTerritory    = true,
+    showEcoGraph     = true,
+    showArmyComp     = true,
+    showRanking      = true,
+    showAlerts       = true,
+    showTimeline     = true,
+    showMVPs         = true,
+}
+local settingsOrder = {
+    { key = "showPlayerStats",  label = "Player Stats" },
+    { key = "showTeamBalance",  label = "Team Balance" },
+    { key = "showTeamEcoGraph", label = "Team Eco Graph" },
+    { key = "showTerritory",    label = "Territory Control" },
+    { key = "showEcoGraph",     label = "Eco Comparison" },
+    { key = "showArmyComp",     label = "Army Composition" },
+    { key = "showRanking",      label = "Player Ranking" },
+    { key = "showAlerts",       label = "Event Log" },
+    { key = "showTimeline",     label = "Timeline" },
+    { key = "showMVPs",         label = "MVPs" },
+}
+local settingsWidthY  = 0
+local settingsWidthY2 = 0
+
 ------------------------------------------------------------------------
 -- Load modules
 ------------------------------------------------------------------------
@@ -1240,6 +1269,11 @@ function widget:TextCommand(command)
         Spring.Echo("[Caster] Commentator mode " .. (S.specAutoSwitch and "ON" or "OFF"))
         return true
     end
+    if command == "castersettings" then
+        settingsOpen = not settingsOpen
+        Spring.Echo("[Caster] Settings panel " .. (settingsOpen and "OPEN" or "CLOSED"))
+        return true
+    end
     if command == "castersort" then
         local modes = S.specSortModes
         local idx = 1
@@ -1311,9 +1345,52 @@ function widget:DrawScreen()
         gl.Color(0.3, 1.0, 0.5, 1.0)
         gl.Text("AUTO", tx + 230, ty - fontSize, fontSize - 3, "o")
     end
-    setColor(C.textDim)
-    gl.Text("v1.0", x2 - 40, ty - fontSize, fontSize - 3, "o")
+    -- Settings button
+    if settingsOpen then
+        gl.Color(0.4, 0.8, 1.0, 1.0)
+    else
+        setColor(C.textDim)
+    end
+    gl.Text("[S]", x2 - 35, ty - fontSize, fontSize - 2, "o")
     ty = ty - 26
+
+    -- === Settings panel (toggle sections) ===
+    if settingsOpen then
+        drawDivider(x1 + 8, ty, x2 - 8)
+        ty = ty - 6
+        setColor(C.sectionHead)
+        gl.Text("SETTINGS (/castersettings)", tx, ty - fontSize, fontSize - 2, "o")
+        ty = ty - lineHeight
+
+        for _, item in ipairs(settingsOrder) do
+            local on = settings[item.key]
+            if on then
+                gl.Color(0.3, 1.0, 0.5, 1.0)
+                gl.Text("[ON]", tx, ty - fontSize, fontSize - 3, "o")
+            else
+                gl.Color(1.0, 0.4, 0.3, 0.8)
+                gl.Text("[--]", tx, ty - fontSize, fontSize - 3, "o")
+            end
+            setColor(C.text)
+            gl.Text(item.label, tx + 38, ty - fontSize, fontSize - 3, "o")
+            -- Store clickable area for mouse handling
+            item.y1 = ty - fontSize - 2
+            item.y2 = ty + 2
+            ty = ty - lineHeight + 4
+        end
+        ty = ty - 4
+
+        -- Panel width controls
+        setColor(C.textDim)
+        gl.Text(string.format("Panel width: %d", panelWidth), tx, ty - fontSize, fontSize - 3, "o")
+        gl.Color(0.5, 0.8, 1.0, 0.9)
+        gl.Text("[-]", tx + 120, ty - fontSize, fontSize - 3, "o")
+        gl.Text("[+]", tx + 145, ty - fontSize, fontSize - 3, "o")
+        -- Store clickable area for width buttons
+        settingsWidthY = ty - fontSize - 2
+        settingsWidthY2 = ty + 2
+        ty = ty - lineHeight
+    end
 
     -- === Player selection bar ===
     drawSectionBg(x1 + 2, ty + 2, x2 - 2, ty - 20)
@@ -1333,7 +1410,7 @@ function widget:DrawScreen()
 
     -- === Watched player stats ===
     local watchTD = S.specAllData[S.specWatchTeamID]
-    if watchTD then
+    if watchTD and settings.showPlayerStats then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
 
@@ -1361,7 +1438,7 @@ function widget:DrawScreen()
     end
 
     -- === Team balance ===
-    if #S.specTeamBalance >= 2 then
+    if #S.specTeamBalance >= 2 and settings.showTeamBalance then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1419,7 +1496,7 @@ function widget:DrawScreen()
         -- Team eco graph
         local h1 = S.specTeamMetalHistory[t1.allyTeamID]
         local h2 = S.specTeamMetalHistory[t2.allyTeamID]
-        if h1 and h2 then
+        if h1 and h2 and settings.showTeamEcoGraph then
             setColor(C.sectionHead)
             gl.Text("TEAM ECO (Metal/s, 30s)", tx, ty - fontSize, fontSize - 3, "o")
             ty = ty - lineHeight
@@ -1445,7 +1522,7 @@ function widget:DrawScreen()
     end
 
     -- === Territory control ===
-    if S.specControlCols > 0 and #S.specTeamBalance >= 2 then
+    if S.specControlCols > 0 and #S.specTeamBalance >= 2 and settings.showTerritory then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1487,7 +1564,7 @@ function widget:DrawScreen()
     end
 
     -- === Eco comparison graph (top 4 players) ===
-    if #S.specPlayerList > 1 then
+    if #S.specPlayerList > 1 and settings.showEcoGraph then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1543,7 +1620,7 @@ function widget:DrawScreen()
     end
 
     -- === Army composition of watched player ===
-    if S.specWatchTeamID then
+    if S.specWatchTeamID and settings.showArmyComp then
         local watchTD2 = S.specAllData[S.specWatchTeamID]
         if watchTD2 and watchTD2.armyCompHistory and #watchTD2.armyCompHistory >= 3 then
             drawDivider(x1 + 8, ty, x2 - 8)
@@ -1594,7 +1671,7 @@ function widget:DrawScreen()
     end
 
     -- === Player ranking ===
-    if #S.specPlayerList > 1 then
+    if #S.specPlayerList > 1 and settings.showRanking then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1738,7 +1815,7 @@ function widget:DrawScreen()
     end
 
     -- === Alert log ===
-    if #S.specAlertLog > 0 then
+    if #S.specAlertLog > 0 and settings.showAlerts then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1758,7 +1835,7 @@ function widget:DrawScreen()
     end
 
     -- === Event timeline ===
-    if #S.specTimeline > 0 then
+    if #S.specTimeline > 0 and settings.showTimeline then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         setColor(C.sectionHead)
@@ -1793,7 +1870,7 @@ function widget:DrawScreen()
     end
 
     -- === MVP display (game over) ===
-    if S.gameOver and #S.specMVPs > 0 then
+    if S.gameOver and #S.specMVPs > 0 and settings.showMVPs then
         drawDivider(x1 + 8, ty, x2 - 8)
         ty = ty - 6
         gl.Color(1.0, 0.85, 0.2, 1.0)
@@ -1830,7 +1907,42 @@ function widget:MousePress(mx, my, button)
     if not panelVisible then return false end
     local px = panelPosX or (vsx - panelWidth - panelMargin)
     local py = panelPosY or (vsy - panelMargin - panelTopOffset)
-    if mx >= px and mx <= px + panelWidth and my >= py - 30 and my <= py then
+    local x2 = px + panelWidth
+
+    -- [S] settings button (top-right corner of title bar)
+    if mx >= x2 - 40 and mx <= x2 - 5 and my >= py - 26 and my <= py - 6 then
+        settingsOpen = not settingsOpen
+        return true
+    end
+
+    -- Settings panel clicks
+    if settingsOpen and mx >= px and mx <= x2 then
+        local tx = px + 12
+        -- Toggle clicks
+        for _, item in ipairs(settingsOrder) do
+            if item.y1 and item.y2 and my >= item.y1 and my <= item.y2 then
+                settings[item.key] = not settings[item.key]
+                local state = settings[item.key] and "ON" or "OFF"
+                Spring.Echo("[Caster] " .. item.label .. ": " .. state)
+                return true
+            end
+        end
+        -- Width buttons
+        if my >= settingsWidthY and my <= settingsWidthY2 then
+            if mx >= tx + 120 and mx <= tx + 140 then
+                panelWidth = math.max(250, panelWidth - 25)
+                Spring.Echo("[Caster] Panel width: " .. panelWidth)
+                return true
+            elseif mx >= tx + 145 and mx <= tx + 170 then
+                panelWidth = math.min(500, panelWidth + 25)
+                Spring.Echo("[Caster] Panel width: " .. panelWidth)
+                return true
+            end
+        end
+    end
+
+    -- Title bar drag
+    if mx >= px and mx <= x2 and my >= py - 30 and my <= py then
         panelDragging = true
         panelDragOffsetX = mx - px
         panelDragOffsetY = my - py
