@@ -161,6 +161,15 @@ S.specAutoSwitchLastScore = 0
 S.specTimeline    = {}
 S.specTimelineMax = 100
 
+-- Engagement tracking
+S.specEngagementsPerMin = 0
+S.specEngagementCount   = 0
+S.specEngagementTimer   = 0
+
+-- Comeback tracking
+S.specPrevBalancePct    = 50
+S.specComebackAlerted   = false
+
 -- OBS export
 S.specOBSExport = false
 S.specOBSTimer  = 0
@@ -393,6 +402,8 @@ local function initPlayerList()
                 commFront = false,
                 factoryQueue = "",
                 superweapon = nil,
+                buildPower = 0,
+                noAA = false,
             }
         end
     end
@@ -472,6 +483,7 @@ local function updateTracking(gameSecs)
             local pUnits = Spring.GetTeamUnits(p.teamID)
             if pUnits then
                 td.unitCount = #pUnits
+                local pBuildPower = 0
                 local pMex, pFac, pNano, pArmy = 0, 0, 0, 0
                 local pMexExtraction = 0
                 local pHasT2 = td.hasT2
@@ -488,6 +500,10 @@ local function updateTracking(gameSecs)
                     local uDefID = spGetUnitDefID(pUnits[j])
                     if uDefID then
                         local ud = UnitDefs[uDefID]
+                        -- Build power: builders, factories, nanos, commander
+                        if ud and (ud.isBuilder or ud.isFactory) and ud.buildSpeed then
+                            pBuildPower = pBuildPower + ud.buildSpeed
+                        end
                         if isMex(uDefID) then
                             pMex = pMex + 1
                             if ud and ud.extractsMetal then
@@ -625,6 +641,9 @@ local function updateTracking(gameSecs)
                 td.commZ = pCommZ
                 td.factoryQueue = pFactoryQueue
                 td.superweapon = pSuperweapon
+                td.buildPower = pBuildPower
+                -- Counter detection: has air threats but no AA?
+                td.noAA = (pAA == 0 and pTotalArmy >= 5)
 
                 -- Commander position: front or back?
                 if pCommX then
@@ -1019,8 +1038,58 @@ local function checkAlerts(gameSecs)
                 end
             end
 
+            -- Counter detection: no AA but enemy has air
+            if td.noAA and gameSecs > 180 then
+                -- Check if any enemy has air units
+                for _, ep in ipairs(S.specPlayerList) do
+                    if ep.allyTeamID ~= p.allyTeamID then
+                        local etd = S.specAllData[ep.teamID]
+                        if etd and (etd.airCount or 0) >= 3 then
+                            local key = p.teamID .. "_noaa"
+                            if alertOK(key, 60) then
+                                fireAlert(key, 60,
+                                    p.name .. " has NO AA! (" .. etd.airCount .. " enemy air)",
+                                    1.0, 0.6, 0.1)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+
             S.specPrevArmy[p.teamID] = td.armyValue
         end
+    end
+
+    -- Engagement rate tracking
+    S.specEngagementTimer = S.specEngagementTimer + 1
+    if S.specEngagementTimer >= 60 then
+        S.specEngagementsPerMin = S.specEngagementCount
+        S.specEngagementCount = 0
+        S.specEngagementTimer = 0
+    end
+    -- Count battles as engagements
+    if #S.specBattles > 0 then
+        S.specEngagementCount = S.specEngagementCount + 1
+    end
+
+    -- Comeback detection
+    if #S.specTeamBalance >= 2 then
+        local prevDiff = math.abs(S.specPrevBalancePct - 50)
+        local currDiff = math.abs(S.specBalancePct - 50)
+        -- Team was losing badly (>20 diff), now close to even (<8 diff)
+        if prevDiff > 20 and currDiff < 8 and not S.specComebackAlerted then
+            S.specComebackAlerted = true
+            local comingBack = S.specPrevBalancePct > 50 and "T2" or "T1"
+            local key = "comeback_" .. gameSecs
+            fireAlert(key, 60,
+                comingBack .. " COMEBACK! Balance shifting!",
+                0.3, 1.0, 0.8)
+        end
+        if currDiff > 15 then
+            S.specComebackAlerted = false
+        end
+        S.specPrevBalancePct = S.specBalancePct
     end
 end
 
@@ -1717,6 +1786,11 @@ function widget:DrawScreen()
         gl.Text(string.format("Mex: %d  Fac: %d  Nano: %d  %s",
             watchTD.mexCount, watchTD.factoryCount, watchTD.nanoCount, t2str),
             tx, ty - fontSize, fontSize - 3, "o")
+        -- Build power
+        if (watchTD.buildPower or 0) > 0 then
+            setColor(C.textDim)
+            gl.Text(string.format("BP:%.0f", watchTD.buildPower), x2 - 55, ty - fontSize, fontSize - 3, "o")
+        end
         ty = ty - lineHeight
 
         -- Army value + combat HP
@@ -1814,6 +1888,19 @@ function widget:DrawScreen()
             gl.Text(S.specBalanceLabel, barX1 + barW / 2, barY2 - 1, fontSize - 4, "oc")
         end
         ty = ty - barH - 4
+
+        -- Engagement rate
+        if S.specEngagementsPerMin > 0 then
+            setColor(C.textDim)
+            local intensity = S.specEngagementsPerMin >= 10 and "INTENSE" or
+                              S.specEngagementsPerMin >= 5 and "active" or "calm"
+            if S.specEngagementsPerMin >= 10 then gl.Color(1.0, 0.4, 0.2, 0.9)
+            elseif S.specEngagementsPerMin >= 5 then gl.Color(1.0, 0.8, 0.2, 0.8)
+            else setColor(C.textDim) end
+            gl.Text(string.format("Pace: %s (%d/min)", intensity, S.specEngagementsPerMin),
+                tx, ty - fontSize, fontSize - 3, "o")
+            ty = ty - lineHeight + 2
+        end
 
         -- Team summary lines
         local function fmtK(v) return v >= 1000 and string.format("%.1fk", v / 1000) or string.format("%.0f", v) end
