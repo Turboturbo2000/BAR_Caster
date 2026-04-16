@@ -1,0 +1,5 @@
+*.log
+infolog.txt
+coach_obs.txt
+*.bak
+.claude/
